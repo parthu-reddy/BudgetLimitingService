@@ -12,8 +12,10 @@ import java.util.UUID;
 import com.fooddelivery.common.service.NotificationRouterService;
 import com.fooddelivery.common.event.NotificationRequestEvent;
 import com.fooddelivery.common.enums.ChannelType;
+import lombok.extern.slf4j.Slf4j;
 
 @Service
+@Slf4j
 public class PacingEngineService {
 
     private final StringRedisTemplate redisTemplate;

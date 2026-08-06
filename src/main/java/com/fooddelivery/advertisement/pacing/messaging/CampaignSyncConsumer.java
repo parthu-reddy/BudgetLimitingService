@@ -5,19 +5,17 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fooddelivery.common.constants.EventType;
 import com.fooddelivery.common.constants.KafkaConstants;
 import com.fooddelivery.common.constants.RedisKeyConstants;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 import java.time.Duration;
 import java.util.concurrent.ThreadLocalRandom;
+import lombok.extern.slf4j.Slf4j;
 
 @Service
+@Slf4j
 public class CampaignSyncConsumer {
-    private static final Logger log = LoggerFactory.getLogger(CampaignSyncConsumer.class);
-
-    private final ObjectMapper objectMapper;
+private final ObjectMapper objectMapper;
     private final StringRedisTemplate redisTemplate;
 
     public CampaignSyncConsumer(ObjectMapper objectMapper, StringRedisTemplate redisTemplate) {
