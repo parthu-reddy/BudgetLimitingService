@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: advertisement-config
+  namespace: food-delivery
+data:
+  DB_URL: "jdbc:postgresql://postgres.food-delivery.svc.cluster.local:5432/advertisement_db"
+  KAFKA_BOOTSTRAP_SERVERS: "kafka.food-delivery.svc.cluster.local:9092"
+  REDIS_HOST: "redis.food-delivery.svc.cluster.local"

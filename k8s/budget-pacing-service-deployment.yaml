@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: budget-pacing-service
+  namespace: food-delivery
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: budget-pacing-service
+  template:
+    metadata:
+      labels:
+        app: budget-pacing-service
+    spec:
+      containers:
+        - name: budget-pacing-service
+          image: food-delivery/budget-pacing-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8100
+          envFrom:
+            - configMapRef:
+                name: advertisement-config
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: "prod"
