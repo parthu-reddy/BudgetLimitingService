@@ -9,6 +9,7 @@ import org.springframework.cloud.openfeign.EnableFeignClients;
 @SpringBootApplication
 @EnableScheduling
 @EnableFeignClients
+@org.springframework.context.annotation.ComponentScan({"com.fooddelivery.advertisement.pacing", "com.fooddelivery.common.service"})
 public class BudgetPacingApplication {
     public static void main(String[] args) {
         SpringApplication.run(BudgetPacingApplication.class, args);
