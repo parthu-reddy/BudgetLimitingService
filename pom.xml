@@ -23,6 +23,10 @@
                     <artifactId>spring-boot-starter-web</artifactId>
                 </dependency>
         <dependency>
+            <groupId>org.springframework.kafka</groupId>
+            <artifactId>spring-kafka</artifactId>
+        </dependency>
+        <dependency>
                     <groupId>org.springframework.boot</groupId>
                     <artifactId>spring-boot-starter-data-redis</artifactId>
                 </dependency>
@@ -31,10 +35,14 @@
                     <artifactId>spring-boot-starter-quartz</artifactId>
                 </dependency>
         <dependency>
-                    <groupId>org.springframework.cloud</groupId>
-                    <artifactId>spring-cloud-starter-openfeign</artifactId>
-                    <version>4.0.4</version>
-                </dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-openfeign</artifactId>
+            <version>4.0.4</version>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-circuitbreaker-resilience4j</artifactId>
+        </dependency>
         <dependency>
                     <groupId>com.fooddelivery</groupId>
                     <artifactId>common-library</artifactId>

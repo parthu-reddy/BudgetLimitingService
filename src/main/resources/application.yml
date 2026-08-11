@@ -3,6 +3,15 @@ spring:
     import: optional:configserver:${CONFIG_SERVER_URL:http://localhost:8888}
   application:
     name: budget-pacing-service
+  cloud:
+    openfeign:
+      client:
+        config:
+          default:
+            connectTimeout: 2000
+            readTimeout: 3000
+      circuitbreaker:
+        enabled: true
   redis:
     host: ${REDIS_HOST:localhost}
     port: ${REDIS_PORT:6379}
@@ -42,3 +51,7 @@ resilience4j:
         waitDuration: 500ms
         enableExponentialBackoff: true
         exponentialBackoffMultiplier: 2
+  timelimiter:
+    configs:
+      default:
+        timeoutDuration: 3s

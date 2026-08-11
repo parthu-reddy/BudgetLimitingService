@@ -7,7 +7,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import java.util.List;
 import java.util.Map;
 
-@FeignClient(name = "campaign-service", url = "${campaign-service.url:http://campaign-service}")
+@FeignClient(name = "campaign-service", url = "${campaign-service.url:http://campaign-service}", fallback = CampaignClientFallback.class)
 public interface CampaignClient {
 
     @PostMapping("/api/v1/internal/campaigns/batch/budgets")
