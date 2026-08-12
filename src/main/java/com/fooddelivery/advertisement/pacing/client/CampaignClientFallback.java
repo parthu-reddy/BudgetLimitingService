@@ -5,7 +5,7 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 import java.util.Map;
 
-@Component
+@Component("budgetlimitingCampaignClientFallback")
 public class CampaignClientFallback implements CampaignClient {
     @Override
     public Map<String, CampaignPacingDTO> getDailyBudgets(List<String> campaignIds) {
