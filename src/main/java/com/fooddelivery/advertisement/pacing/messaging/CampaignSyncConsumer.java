@@ -18,9 +18,10 @@ import java.time.Duration;
 import java.util.concurrent.ThreadLocalRandom;
 
 @Service
+@lombok.extern.slf4j.Slf4j
 public class CampaignSyncConsumer {
     @java.lang.SuppressWarnings("all")
-    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(CampaignSyncConsumer.class);
+
     private final ObjectMapper objectMapper;
     private final StringRedisTemplate redisTemplate;
 

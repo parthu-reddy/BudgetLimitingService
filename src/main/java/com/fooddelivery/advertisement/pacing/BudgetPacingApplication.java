@@ -8,7 +8,7 @@ import com.fooddelivery.common.service.NotificationRouterService;
 
 import org.springframework.cloud.openfeign.EnableFeignClients;
 
-@SpringBootApplication(scanBasePackages = {"com.fooddelivery.advertisement.pacing"})
+@SpringBootApplication(scanBasePackages = {"com.fooddelivery.advertisement.pacing", "com.fooddelivery"})
 @EnableScheduling
 @EnableFeignClients
 @Import(NotificationRouterService.class)

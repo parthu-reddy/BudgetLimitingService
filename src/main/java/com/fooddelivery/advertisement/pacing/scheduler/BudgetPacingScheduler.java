@@ -19,6 +19,11 @@ public class BudgetPacingScheduler {
     // Run every minute
     @Scheduled(fixedRateString = "${pacing.interval.ms:60000}")
     public void runPacingEvaluation() {
+        Boolean locked = redisTemplate.opsForValue().setIfAbsent("lock:pacing_job", "1", java.time.Duration.ofSeconds(50));
+        if (!Boolean.TRUE.equals(locked)) {
+            return;
+        }
+        
         java.util.Set<String> activeCampaigns = redisTemplate.opsForSet().members(com.fooddelivery.common.constants.RedisKeyConstants.KEY_ACTIVE_CAMPAIGNS);
         if (activeCampaigns != null && !activeCampaigns.isEmpty()) {
             pacingEngineService.evaluatePacingForCampaigns(new java.util.ArrayList<>(activeCampaigns));
