@@ -59,17 +59,11 @@ public class CampaignSyncConsumer {
             }
             idempotencyKeyRepository.save(new IdempotencyKey(idempotencyKeyStr));
 
-            if (root.has("eventType") && root.has("payload")) {
-                String eventTypeStr = root.get("eventType").asText();
-                JsonNode payload = root.get("payload");
-                if (payload.isTextual()) {
-                    try {
-                        payload = objectMapper.readTree(payload.asText());
-                    } catch (Exception e) {
-                        log.error("Failed to parse embedded payload", e);
-                        return null;
-                    }
-                }
+            // See BiddingEngine.CampaignEventConsumer: ad-events carries a FLAT Campaign, so the
+            // previous {eventType, payload} guard never fired and pacing data was never synced.
+            String eventTypeStr = com.fooddelivery.common.util.EventPayloadUtils.resolveEventType(root, headers);
+            JsonNode payload = com.fooddelivery.common.util.EventPayloadUtils.unwrapPayload(root);
+            if (eventTypeStr != null && payload != null) {
                 String campaignId = payload.has("id") ? payload.get("id").asText() : null;
                 if (campaignId == null) {
                     return null;
