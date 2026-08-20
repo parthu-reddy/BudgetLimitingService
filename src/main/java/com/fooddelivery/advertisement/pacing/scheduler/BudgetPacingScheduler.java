@@ -16,7 +16,6 @@ public class BudgetPacingScheduler {
         this.redisTemplate = redisTemplate;
     }
 
-    // Run every minute
     @Scheduled(fixedRateString = "${pacing.interval.ms:60000}")
     public void runPacingEvaluation() {
         Boolean locked = redisTemplate.opsForValue().setIfAbsent("lock:pacing_job", "1", java.time.Duration.ofSeconds(50));
@@ -24,9 +23,26 @@ public class BudgetPacingScheduler {
             return;
         }
         
-        java.util.Set<String> activeCampaigns = redisTemplate.opsForSet().members(com.fooddelivery.common.constants.RedisKeyConstants.KEY_ACTIVE_CAMPAIGNS);
-        if (activeCampaigns != null && !activeCampaigns.isEmpty()) {
-            pacingEngineService.evaluatePacingForCampaigns(new java.util.ArrayList<>(activeCampaigns));
+        try {
+            org.springframework.data.redis.core.ScanOptions options = org.springframework.data.redis.core.ScanOptions.scanOptions().match("*").count(100).build();
+            try (org.springframework.data.redis.core.Cursor<String> cursor = redisTemplate.opsForSet().scan(com.fooddelivery.common.constants.RedisKeyConstants.KEY_ACTIVE_CAMPAIGNS, options)) {
+                java.util.List<String> batch = new java.util.ArrayList<>();
+                while (cursor.hasNext()) {
+                    batch.add(cursor.next());
+                    if (batch.size() >= 100) {
+                        pacingEngineService.evaluatePacingForCampaigns(new java.util.ArrayList<>(batch));
+                        batch.clear();
+                    }
+                }
+                if (!batch.isEmpty()) {
+                    pacingEngineService.evaluatePacingForCampaigns(batch);
+                }
+            } catch (Exception e) {
+                // handle error
+                e.printStackTrace();
+            }
+        } finally {
+            redisTemplate.delete("lock:pacing_job");
         }
     }
 }

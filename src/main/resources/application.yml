@@ -1,22 +1,8 @@
 spring:
-  kafka:
-    listener:
-      observation-enabled: true
-    template:
-      observation-enabled: true
   config:
-    import: optional:configserver:${CONFIG_SERVER_URL:http://localhost:8888}
+    import: optional:classpath:config/platform-defaults.yml,optional:configserver:${CONFIG_SERVER_URL:http://localhost:8888}
   application:
     name: budget-pacing-service
-  cloud:
-    openfeign:
-      client:
-        config:
-          default:
-            connectTimeout: 2000
-            readTimeout: 3000
-      circuitbreaker:
-        enabled: true
   redis:
     host: ${REDIS_HOST:localhost}
     port: ${REDIS_PORT:6379}
@@ -34,49 +20,16 @@ spring:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/budget_db}
     username: ${SPRING_DATASOURCE_USERNAME:postgres}
     password: ${SPRING_DATASOURCE_PASSWORD:postgres}
-
+  jpa:
+    hibernate:
+      ddl-auto: update
+  cloud:
+    openfeign:
+      circuitbreaker:
+        enabled: true
 server:
   port: 8103
-
 eureka:
   client:
     serviceUrl:
       defaultZone: ${EUREKA_CLIENT_SERVICEURL_DEFAULTZONE:http://localhost:8761/eureka/}
-  instance:
-    preferIpAddress: true
-
-management:
-  tracing:
-    enabled: true
-    sampling:
-      probability: 1.0
-  otlp:
-    tracing:
-      endpoint: http://localhost:4318/v1/traces
-  endpoints:
-    web:
-      exposure:
-        include: health,info,prometheus
-
-resilience4j:
-  circuitbreaker:
-    configs:
-      default:
-        slidingWindowSize: 10
-        minimumNumberOfCalls: 5
-        failureRateThreshold: 50
-        waitDurationInOpenState: 10s
-        permittedNumberOfCallsInHalfOpenState: 3
-        automaticTransitionFromOpenToHalfOpenEnabled: true
-  retry:
-    configs:
-      default:
-        maxAttempts: 3
-        waitDuration: 500ms
-        enableExponentialBackoff: true
-        exponentialBackoffMultiplier: 2
-  timelimiter:
-    configs:
-      default:
-        timeoutDuration: 3s
-

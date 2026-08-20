@@ -13,6 +13,14 @@ import java.util.UUID;
 import com.fooddelivery.common.service.NotificationRouterService;
 import com.fooddelivery.common.event.NotificationRequestEvent;
 import com.fooddelivery.common.enums.ChannelType;
+import org.springframework.kafka.core.KafkaTemplate;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fooddelivery.common.constants.EventType;
+import com.fooddelivery.common.outbox.repository.OutboxEventRepository;
+import com.fooddelivery.common.outbox.entity.OutboxEventEntity;
+import com.fooddelivery.common.enums.OutboxStatus;
+import com.fooddelivery.common.constants.AggregateType;
+import com.fooddelivery.common.event.CampaignChangedEvent;
 
 @Service
 @lombok.extern.slf4j.Slf4j
@@ -22,24 +30,33 @@ public class PacingEngineService {
     private final StringRedisTemplate redisTemplate;
     private final CampaignClient campaignClient;
     private final NotificationRouterService notificationRouterService;
+    private final OutboxEventRepository outboxEventRepository;
+    private final ObjectMapper objectMapper;
     // Lower bound floor to prevent 0% win rate
     private static final double S_MIN = 0.1;
 
-    public PacingEngineService(StringRedisTemplate redisTemplate, CampaignClient campaignClient, NotificationRouterService notificationRouterService) {
+    @org.springframework.beans.factory.annotation.Value("${pacing.time-of-day-target.enabled:false}")
+    private boolean timeOfDayTargetEnabled;
+
+    public PacingEngineService(StringRedisTemplate redisTemplate, CampaignClient campaignClient, NotificationRouterService notificationRouterService, OutboxEventRepository outboxEventRepository, ObjectMapper objectMapper) {
         this.redisTemplate = redisTemplate;
         this.campaignClient = campaignClient;
         this.notificationRouterService = notificationRouterService;
+        this.outboxEventRepository = outboxEventRepository;
+        this.objectMapper = objectMapper;
     }
 
     public void evaluatePacingForCampaigns(List<String> activeCampaignIds) {
         if (activeCampaignIds == null || activeCampaignIds.isEmpty()) return;
-        // 1. Pipeline Get all current multipliers and daily spends
+        // 1. Pipeline Get all current multipliers, daily spends, and lifetime spends
         List<Object> pipelineResults = redisTemplate.executePipelined((RedisCallback<Object>) connection -> {
             for (String campaignId : activeCampaignIds) {
                 // Get multiplier
                 connection.get(redisTemplate.getStringSerializer().serialize(String.format(RedisKeyConstants.PREFIX_AD_CAMPAIGN_PACING, campaignId)));
                 // Get current daily spend
                 connection.get(redisTemplate.getStringSerializer().serialize("campaign:spend:daily:" + campaignId));
+                // Get current lifetime spend
+                connection.get(redisTemplate.getStringSerializer().serialize("campaign:spend:lifetime:" + campaignId));
             }
             return null;
         });
@@ -52,8 +69,9 @@ public class PacingEngineService {
         for (int i = 0; i < activeCampaignIds.size(); i++) {
             String campaignId = activeCampaignIds.get(i);
             
-            Object currentSObj = pipelineResults.get(i * 2);
-            Object spendObj = pipelineResults.get(i * 2 + 1);
+            Object currentSObj = pipelineResults.get(i * 3);
+            Object spendObj = pipelineResults.get(i * 3 + 1);
+            Object lifetimeSpendObj = pipelineResults.get(i * 3 + 2);
             
             CampaignPacingDTO pacingDTO = dailyBudgets.get(campaignId);
             if (pacingDTO == null || pacingDTO.getDailyBudget() == null || pacingDTO.getDailyBudget() <= 0) {
@@ -64,19 +82,50 @@ public class PacingEngineService {
             }
             
             double currentSpend = parseDouble(spendObj, 0.0);
-            double targetSpend = pacingDTO.getDailyBudget(); // In a real system, scaled by hours elapsed
-            double currentS = parseMultiplier(currentSObj);
+            double dailyBudget = pacingDTO.getDailyBudget();
+            double targetSpend = dailyBudget;
             
-            if (currentSpend > targetSpend) {
-                currentS = Math.max(S_MIN, currentS - 0.05);
-            } else {
-                currentS = Math.min(1.0, currentS + 0.05);
+            if (timeOfDayTargetEnabled) {
+                java.time.LocalTime now = java.time.LocalTime.now(java.time.ZoneId.of("UTC"));
+                double elapsedFractionOfDay = (now.getHour() * 3600 + now.getMinute() * 60 + now.getSecond()) / 86400.0;
+                targetSpend = dailyBudget * elapsedFractionOfDay;
             }
+            
+            double lifetimeSpend = parseDouble(lifetimeSpendObj, 0.0);
+            Double targetLifetimeSpend = pacingDTO.getLifetimeBudget();
+            
+            double currentS = parseMultiplier(currentSObj);
+            double previousS = currentS;
+
+            if (currentSpend >= dailyBudget || (targetLifetimeSpend != null && lifetimeSpend >= targetLifetimeSpend)) {
+                // Budget exhausted
+                updatedMultipliers.put(campaignId, 0.0);
+                emitBudgetExhaustedEvent(campaignId, pacingDTO.getAdvertiserId());
+                // Remove from active campaigns set
+                redisTemplate.opsForSet().remove(RedisKeyConstants.KEY_ACTIVE_CAMPAIGNS, campaignId);
+                continue;
+            }
+            
+            if (currentSpend == 0.0) {
+                currentS = Math.min(1.0, currentS + 0.1); // Ramp up if no spend
+            } else if (targetSpend > 0) {
+                double adjustmentRatio = targetSpend / currentSpend;
+                // Proportional adjustment with some dampening
+                adjustmentRatio = Math.max(0.5, Math.min(1.5, adjustmentRatio));
+                currentS = currentS * adjustmentRatio;
+            }
+            
+            currentS = Math.max(S_MIN, Math.min(1.0, currentS));
             // Notification: Budget Running Low (<20% remaining)
             if (currentSpend >= 0.8 * pacingDTO.getDailyBudget()) {
                 sendBudgetLowNotification(campaignId, pacingDTO.getAdvertiserId() != null ? pacingDTO.getAdvertiserId().toString() : campaignId);
             }
             updatedMultipliers.put(campaignId, currentS);
+            
+            // Emit update if pacing changed, or if it was previously exhausted (pacing was 0.0)
+            if (currentS != previousS || previousS == 0.0) {
+                emitPacingUpdatedEvent(campaignId, pacingDTO.getAdvertiserId(), currentS, false);
+            }
         }
         // 4. Pipeline Set all new multipliers
         redisTemplate.executePipelined((RedisCallback<Object>) connection -> {
@@ -109,11 +158,61 @@ public class PacingEngineService {
             NotificationRequestEvent evt = NotificationRequestEvent.builder()
                 .channel(ChannelType.EMAIL)
                 .eventName("BUDGET_RUNNING_LOW")
-                .explicitRecipient(advertiserIdStr)
+                .userId(advertiserIdStr != null ? UUID.fromString(advertiserIdStr) : null)
                 .payload(Map.of("campaignId", campaignId, "message", "Your campaign budget is running low (<20% remaining)."))
                 .build();
             notificationRouterService.routeNotification(evt);
             redisTemplate.opsForValue().set(notifiedKey, "true", java.time.Duration.ofHours(24));
+        }
+    }
+
+    private void emitBudgetExhaustedEvent(String campaignId, UUID advertiserId) {
+        try {
+            CampaignChangedEvent eventPayload = CampaignChangedEvent.builder()
+                .campaignId(UUID.fromString(campaignId))
+                .advertiserId(advertiserId)
+                .budgetExhausted(true)
+                .build();
+            
+            OutboxEventEntity event = OutboxEventEntity.builder()
+                .id(UUID.randomUUID())
+                .createdAt(java.time.LocalDateTime.now())
+                .aggregateType(AggregateType.ADVERTISEMENT)
+                .aggregateId(campaignId)
+                .eventType(EventType.AD_CAMPAIGN_BUDGET_EXHAUSTED)
+                .idempotencyKey(campaignId + ":exhausted:" + System.currentTimeMillis())
+                .payload(objectMapper.writeValueAsString(eventPayload))
+                .status(OutboxStatus.UNPROCESSED)
+                .build();
+            
+            outboxEventRepository.save(event);
+        } catch (Exception e) {
+            log.error("Failed to emit AD_CAMPAIGN_BUDGET_EXHAUSTED for campaign {}", campaignId, e);
+        }
+    }
+    private void emitPacingUpdatedEvent(String campaignId, UUID advertiserId, double pacingMultiplier, boolean budgetExhausted) {
+        try {
+            CampaignChangedEvent eventPayload = CampaignChangedEvent.builder()
+                .campaignId(UUID.fromString(campaignId))
+                .advertiserId(advertiserId)
+                .pacingMultiplier(pacingMultiplier)
+                .budgetExhausted(budgetExhausted)
+                .build();
+            
+            OutboxEventEntity event = OutboxEventEntity.builder()
+                .id(UUID.randomUUID())
+                .createdAt(java.time.LocalDateTime.now())
+                .aggregateType(AggregateType.ADVERTISEMENT)
+                .aggregateId(campaignId)
+                .eventType(EventType.AD_CAMPAIGN_PACING_UPDATED)
+                .idempotencyKey(campaignId + ":pacing:" + System.currentTimeMillis())
+                .payload(objectMapper.writeValueAsString(eventPayload))
+                .status(OutboxStatus.UNPROCESSED)
+                .build();
+            
+            outboxEventRepository.save(event);
+        } catch (Exception e) {
+            log.error("Failed to emit AD_CAMPAIGN_PACING_UPDATED for campaign {}", campaignId, e);
         }
     }
 }

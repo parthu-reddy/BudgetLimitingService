@@ -4,12 +4,14 @@ import java.util.UUID;
 
 public class CampaignPacingDTO {
     private Double dailyBudget;
+    private Double lifetimeBudget;
     private UUID advertiserId;
 
     public CampaignPacingDTO() {}
 
-    public CampaignPacingDTO(Double dailyBudget, UUID advertiserId) {
+    public CampaignPacingDTO(Double dailyBudget, Double lifetimeBudget, UUID advertiserId) {
         this.dailyBudget = dailyBudget;
+        this.lifetimeBudget = lifetimeBudget;
         this.advertiserId = advertiserId;
     }
 
@@ -27,5 +29,13 @@ public class CampaignPacingDTO {
 
     public void setAdvertiserId(UUID advertiserId) {
         this.advertiserId = advertiserId;
+    }
+
+    public Double getLifetimeBudget() {
+        return lifetimeBudget;
+    }
+
+    public void setLifetimeBudget(Double lifetimeBudget) {
+        this.lifetimeBudget = lifetimeBudget;
     }
 }

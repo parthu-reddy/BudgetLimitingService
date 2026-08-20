@@ -73,3 +73,6 @@ delivery:
     radius: 5.0
 campaign-service:
   url: http://localhost:8095
+platform:
+  auction:
+    token-secret: contract-test-secret

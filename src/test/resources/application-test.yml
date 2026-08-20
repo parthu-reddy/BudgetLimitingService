@@ -1,2 +1,5 @@
 stubrunner:
   stubsMode: LOCAL
+platform:
+  auction:
+    token-secret: contract-test-secret

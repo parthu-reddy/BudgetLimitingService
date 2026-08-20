@@ -20,6 +20,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import java.time.Duration;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.UUID;
+import io.micrometer.core.instrument.MeterRegistry;
 
 @Service
 @lombok.extern.slf4j.Slf4j
@@ -29,12 +30,16 @@ public class CampaignSyncConsumer {
     private final StringRedisTemplate redisTemplate;
     private final IIdempotencyKeyRepository idempotencyKeyRepository;
     private final TransactionTemplate transactionTemplate;
+    private final com.fooddelivery.advertisement.pacing.service.PacingEngineService pacingEngineService;
+    private final MeterRegistry meterRegistry;
 
-    public CampaignSyncConsumer(ObjectMapper objectMapper, StringRedisTemplate redisTemplate, IIdempotencyKeyRepository idempotencyKeyRepository, TransactionTemplate transactionTemplate) {
+    public CampaignSyncConsumer(ObjectMapper objectMapper, StringRedisTemplate redisTemplate, IIdempotencyKeyRepository idempotencyKeyRepository, TransactionTemplate transactionTemplate, @org.springframework.context.annotation.Lazy com.fooddelivery.advertisement.pacing.service.PacingEngineService pacingEngineService, MeterRegistry meterRegistry) {
         this.objectMapper = objectMapper;
         this.redisTemplate = redisTemplate;
         this.idempotencyKeyRepository = idempotencyKeyRepository;
         this.transactionTemplate = transactionTemplate;
+        this.pacingEngineService = pacingEngineService;
+        this.meterRegistry = meterRegistry;
     }
 
     @RetryableTopic(attempts = "5", backoff = @Backoff(delay = 1000, multiplier = 2.0), autoCreateTopics = "true", dltStrategy = DltStrategy.FAIL_ON_ERROR)
@@ -53,35 +58,53 @@ public class CampaignSyncConsumer {
         String idempotencyKeyStr = "processed_event:" + resolvedEventId;
 
         transactionTemplate.execute(status -> {
-            if (idempotencyKeyRepository.existsById(idempotencyKeyStr)) {
+            if (idempotencyKeyRepository.tryClaim(idempotencyKeyStr) == 0) {
                 log.info("Duplicate campaign sync event ignored: {}", idempotencyKeyStr);
                 return null;
             }
-            idempotencyKeyRepository.save(new IdempotencyKey(idempotencyKeyStr));
 
             // See BiddingEngine.CampaignEventConsumer: ad-events carries a FLAT Campaign, so the
             // previous {eventType, payload} guard never fired and pacing data was never synced.
             String eventTypeStr = com.fooddelivery.common.util.EventPayloadUtils.resolveEventType(root, headers);
             JsonNode payload = com.fooddelivery.common.util.EventPayloadUtils.unwrapPayload(root);
             if (eventTypeStr != null && payload != null) {
-                String campaignId = payload.has("id") ? payload.get("id").asText() : null;
+                String campaignId = com.fooddelivery.common.util.EventPayloadUtils.campaignId(payload);
                 if (campaignId == null) {
+                    meterRegistry.counter("campaign_event_dropped_total", "reason", "no_campaign_id").increment();
+                    log.warn("Dropping ad-event with no resolvable campaign id: {}", eventTypeStr);
                     return null;
                 }
-                if (EventType.AD_CAMPAIGN_CREATED.name().equals(eventTypeStr) || EventType.AD_CAMPAIGN_UPDATED.name().equals(eventTypeStr)) {
+                if (EventType.AD_CAMPAIGN_CREATED.name().equals(eventTypeStr) || EventType.AD_CAMPAIGN_UPDATED.name().equals(eventTypeStr) || EventType.AD_CAMPAIGN_RESUMED.name().equals(eventTypeStr)) {
                     String maxBid = payload.has("maxBid") ? payload.get("maxBid").asText() : null;
                     String advertiserId = payload.has("advertiserId") ? payload.get("advertiserId").asText() : null;
-                    Duration ttl = Duration.ofHours(48).plusMinutes(ThreadLocalRandom.current().nextLong(60));
-                    if (maxBid != null) {
-                        String bidKey = String.format(RedisKeyConstants.PREFIX_AD_CAMPAIGN_MAX_BID, campaignId);
-                        redisTemplate.opsForValue().set(bidKey, maxBid, ttl);
+                    String campaignStatus = payload.has("status") ? payload.get("status").asText() : "ACTIVE";
+                    
+                    if ("ACTIVE".equals(campaignStatus)) {
+                        Duration ttl = Duration.ofHours(48).plusMinutes(ThreadLocalRandom.current().nextLong(60));
+                        if (maxBid != null) {
+                            String bidKey = String.format(RedisKeyConstants.PREFIX_AD_CAMPAIGN_MAX_BID, campaignId);
+                            redisTemplate.opsForValue().set(bidKey, maxBid, ttl);
+                        }
+                        if (advertiserId != null) {
+                            String advKey = String.format(RedisKeyConstants.PREFIX_AD_CAMPAIGN_ADVERTISER, campaignId);
+                            redisTemplate.opsForValue().set(advKey, advertiserId, ttl);
+                        }
+                        redisTemplate.opsForSet().add(RedisKeyConstants.KEY_ACTIVE_CAMPAIGNS, campaignId);
+                        log.info("Synced campaign {} to Redis (Created/Updated/Resumed and ACTIVE)", campaignId);
+                        
+                        if (EventType.AD_CAMPAIGN_UPDATED.name().equals(eventTypeStr) || EventType.AD_CAMPAIGN_RESUMED.name().equals(eventTypeStr)) {
+                            // Synchronously evaluate pacing to prevent overspend if the new budget is still exhausted
+                            // and to emit PACING_UPDATED if it was replenished.
+                            try {
+                                pacingEngineService.evaluatePacingForCampaigns(java.util.Collections.singletonList(campaignId));
+                            } catch (Exception e) {
+                                log.error("Failed to evaluate pacing synchronously for updated/resumed campaign {}", campaignId, e);
+                            }
+                        }
+                    } else {
+                        redisTemplate.opsForSet().remove(RedisKeyConstants.KEY_ACTIVE_CAMPAIGNS, campaignId);
+                        log.info("Removed campaign {} from active Redis set due to event {} with status {}", campaignId, eventTypeStr, campaignStatus);
                     }
-                    if (advertiserId != null) {
-                        String advKey = String.format(RedisKeyConstants.PREFIX_AD_CAMPAIGN_ADVERTISER, campaignId);
-                        redisTemplate.opsForValue().set(advKey, advertiserId, ttl);
-                    }
-                    redisTemplate.opsForSet().add(RedisKeyConstants.KEY_ACTIVE_CAMPAIGNS, campaignId);
-                    log.info("Synced campaign {} to Redis (Created/Updated)", campaignId);
                 } else if (EventType.AD_CAMPAIGN_PAUSED.name().equals(eventTypeStr) || EventType.AD_CAMPAIGN_DELETED.name().equals(eventTypeStr) || EventType.AD_CAMPAIGN_BUDGET_EXHAUSTED.name().equals(eventTypeStr)) {
                     redisTemplate.opsForSet().remove(RedisKeyConstants.KEY_ACTIVE_CAMPAIGNS, campaignId);
                     log.info("Removed campaign {} from active Redis set due to event {}", campaignId, eventTypeStr);

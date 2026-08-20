@@ -18,7 +18,7 @@ spec:
           image: food-delivery/budget-pacing-service:latest
           imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 8100
+            - containerPort: 8103
           envFrom:
             - configMapRef:
                 name: advertisement-config
