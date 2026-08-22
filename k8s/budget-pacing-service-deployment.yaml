@@ -14,32 +14,41 @@ spec:
         app: budget-pacing-service
     spec:
       containers:
-        - name: budget-pacing-service
-          image: food-delivery/budget-pacing-service:latest
-          imagePullPolicy: IfNotPresent
-          ports:
-            - containerPort: 8103
-          envFrom:
-            - configMapRef:
-                name: advertisement-config
-          env:
-            - name: SPRING_PROFILES_ACTIVE
-              value: "prod"
-          livenessProbe:
-            httpGet:
-              path: /actuator/health/liveness
-              port: 8103
-          readinessProbe:
-            httpGet:
-              path: /actuator/health/readiness
-              port: 8103
-          resources:
-            requests:
-              memory: "256Mi"
-              cpu: "100m"
-            limits:
-              memory: "512Mi"
-              cpu: "500m"
-          securityContext:
-            runAsNonRoot: true
-            allowPrivilegeEscalation: false
+      - env:
+        - name: SPRING_PROFILES_ACTIVE
+          value: prod
+        envFrom:
+        - configMapRef:
+            name: advertisement-config
+        image: food-delivery/budget-pacing-service:latest
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /actuator/health/liveness
+            port: 8103
+          initialDelaySeconds: 45
+          periodSeconds: 10
+        name: budget-pacing-service
+        ports:
+        - containerPort: 8103
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /actuator/health/readiness
+            port: 8103
+          initialDelaySeconds: 20
+          periodSeconds: 5
+        resources:
+          limits:
+            cpu: 1000m
+            memory: 2Gi
+          requests:
+            cpu: 250m
+            memory: 1Gi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          runAsNonRoot: true
