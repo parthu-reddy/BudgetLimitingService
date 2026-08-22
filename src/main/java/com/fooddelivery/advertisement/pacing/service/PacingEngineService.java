@@ -32,18 +32,23 @@ public class PacingEngineService {
     private final NotificationRouterService notificationRouterService;
     private final OutboxEventRepository outboxEventRepository;
     private final ObjectMapper objectMapper;
+    private final io.micrometer.core.instrument.MeterRegistry meterRegistry;
     // Lower bound floor to prevent 0% win rate
     private static final double S_MIN = 0.1;
 
     @org.springframework.beans.factory.annotation.Value("${pacing.time-of-day-target.enabled:false}")
     private boolean timeOfDayTargetEnabled;
 
-    public PacingEngineService(StringRedisTemplate redisTemplate, CampaignClient campaignClient, NotificationRouterService notificationRouterService, OutboxEventRepository outboxEventRepository, ObjectMapper objectMapper) {
+    @org.springframework.beans.factory.annotation.Value("${platform.business-zone:UTC}")
+    private String businessZone;
+
+    public PacingEngineService(StringRedisTemplate redisTemplate, CampaignClient campaignClient, NotificationRouterService notificationRouterService, OutboxEventRepository outboxEventRepository, ObjectMapper objectMapper, io.micrometer.core.instrument.MeterRegistry meterRegistry) {
         this.redisTemplate = redisTemplate;
         this.campaignClient = campaignClient;
         this.notificationRouterService = notificationRouterService;
         this.outboxEventRepository = outboxEventRepository;
         this.objectMapper = objectMapper;
+        this.meterRegistry = meterRegistry;
     }
 
     public void evaluatePacingForCampaigns(List<String> activeCampaignIds) {
@@ -78,20 +83,21 @@ public class PacingEngineService {
                 // Fail fast: Do NOT use a hardcoded default like 50.0. 
                 // Exclude from bidding if we don't have a valid budget.
                 updatedMultipliers.put(campaignId, 0.0);
+                meterRegistry.summary("pacing_multiplier").record(0.0);
                 continue;
             }
             
-            double currentSpend = parseDouble(spendObj, 0.0);
+            double currentSpend = parseDouble(spendObj, 0.0) / 10000.0;
             double dailyBudget = pacingDTO.getDailyBudget();
             double targetSpend = dailyBudget;
             
             if (timeOfDayTargetEnabled) {
-                java.time.LocalTime now = java.time.LocalTime.now(java.time.ZoneId.of("UTC"));
+                java.time.LocalTime now = java.time.LocalTime.now(java.time.ZoneId.of(businessZone));
                 double elapsedFractionOfDay = (now.getHour() * 3600 + now.getMinute() * 60 + now.getSecond()) / 86400.0;
                 targetSpend = dailyBudget * elapsedFractionOfDay;
             }
             
-            double lifetimeSpend = parseDouble(lifetimeSpendObj, 0.0);
+            double lifetimeSpend = parseDouble(lifetimeSpendObj, 0.0) / 10000.0;
             Double targetLifetimeSpend = pacingDTO.getLifetimeBudget();
             
             double currentS = parseMultiplier(currentSObj);
@@ -100,6 +106,7 @@ public class PacingEngineService {
             if (currentSpend >= dailyBudget || (targetLifetimeSpend != null && lifetimeSpend >= targetLifetimeSpend)) {
                 // Budget exhausted
                 updatedMultipliers.put(campaignId, 0.0);
+                meterRegistry.summary("pacing_multiplier").record(0.0);
                 emitBudgetExhaustedEvent(campaignId, pacingDTO.getAdvertiserId());
                 // Remove from active campaigns set
                 redisTemplate.opsForSet().remove(RedisKeyConstants.KEY_ACTIVE_CAMPAIGNS, campaignId);
@@ -121,6 +128,7 @@ public class PacingEngineService {
                 sendBudgetLowNotification(campaignId, pacingDTO.getAdvertiserId() != null ? pacingDTO.getAdvertiserId().toString() : campaignId);
             }
             updatedMultipliers.put(campaignId, currentS);
+            meterRegistry.summary("pacing_multiplier").record(currentS);
             
             // Emit update if pacing changed, or if it was previously exhausted (pacing was 0.0)
             if (currentS != previousS || previousS == 0.0) {

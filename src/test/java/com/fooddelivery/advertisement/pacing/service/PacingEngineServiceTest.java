@@ -42,15 +42,23 @@ class PacingEngineServiceTest {
     @Mock
     private SetOperations<String, String> setOperations;
 
+    /* A real in-memory registry: a mocked MeterRegistry returns null from summary(),
+       which NPEs when the pacing loop records pacing_multiplier. */
+    private final io.micrometer.core.instrument.MeterRegistry meterRegistry =
+            new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+
     private PacingEngineService pacingEngineService;
     private ObjectMapper objectMapper = new ObjectMapper();
 
     @BeforeEach
     void setUp() {
         pacingEngineService = new PacingEngineService(
-                redisTemplate, campaignClient, notificationRouterService, outboxEventRepository, objectMapper
+                redisTemplate, campaignClient, notificationRouterService, outboxEventRepository, objectMapper, meterRegistry
         );
         ReflectionTestUtils.setField(pacingEngineService, "timeOfDayTargetEnabled", true);
+        // businessZone is @Value-injected; a plain Mockito context leaves it null and
+        // ZoneId.of(null) throws. The time mock below is built on UTC, so match it.
+        ReflectionTestUtils.setField(pacingEngineService, "businessZone", "UTC");
     }
 
     @Test
@@ -58,8 +66,11 @@ class PacingEngineServiceTest {
         String campaignId = UUID.randomUUID().toString();
         List<String> activeCampaigns = Collections.singletonList(campaignId);
 
-        // Current multiplier is 1.0, current spend is 60.0
-        List<Object> pipelineResults = List.of("1.0", "60.0", "60.0");
+        // Current multiplier is 1.0, current spend is 60.00.
+        // UserTrackingService stores spend as ten-thousandths (DECIMAL(19,4)), so 60.00 rupees
+        // is 600000 in Redis. Passing "60.0" here would be read back as 0.006 and the
+        // ahead-of-schedule branch would never be reached.
+        List<Object> pipelineResults = List.of("1.0", "600000", "600000");
         when(redisTemplate.executePipelined(any(RedisCallback.class))).thenReturn(pipelineResults);
 
         CampaignPacingDTO dto = new CampaignPacingDTO();

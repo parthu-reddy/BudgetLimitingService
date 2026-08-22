@@ -25,3 +25,21 @@ spec:
           env:
             - name: SPRING_PROFILES_ACTIVE
               value: "prod"
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8103
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8103
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false

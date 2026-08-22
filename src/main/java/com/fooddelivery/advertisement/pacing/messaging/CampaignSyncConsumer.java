@@ -66,7 +66,7 @@ public class CampaignSyncConsumer {
             // See BiddingEngine.CampaignEventConsumer: ad-events carries a FLAT Campaign, so the
             // previous {eventType, payload} guard never fired and pacing data was never synced.
             String eventTypeStr = com.fooddelivery.common.util.EventPayloadUtils.resolveEventType(root, headers);
-            JsonNode payload = com.fooddelivery.common.util.EventPayloadUtils.unwrapPayload(root);
+            JsonNode payload = root;
             if (eventTypeStr != null && payload != null) {
                 String campaignId = com.fooddelivery.common.util.EventPayloadUtils.campaignId(payload);
                 if (campaignId == null) {
@@ -105,7 +105,7 @@ public class CampaignSyncConsumer {
                         redisTemplate.opsForSet().remove(RedisKeyConstants.KEY_ACTIVE_CAMPAIGNS, campaignId);
                         log.info("Removed campaign {} from active Redis set due to event {} with status {}", campaignId, eventTypeStr, campaignStatus);
                     }
-                } else if (EventType.AD_CAMPAIGN_PAUSED.name().equals(eventTypeStr) || EventType.AD_CAMPAIGN_DELETED.name().equals(eventTypeStr) || EventType.AD_CAMPAIGN_BUDGET_EXHAUSTED.name().equals(eventTypeStr)) {
+                } else if (EventType.AD_CAMPAIGN_PAUSED.name().equals(eventTypeStr) || EventType.AD_CAMPAIGN_DELETED.name().equals(eventTypeStr) || EventType.AD_CAMPAIGN_COMPLETED.name().equals(eventTypeStr) || EventType.AD_CAMPAIGN_BUDGET_EXHAUSTED.name().equals(eventTypeStr)) {
                     redisTemplate.opsForSet().remove(RedisKeyConstants.KEY_ACTIVE_CAMPAIGNS, campaignId);
                     log.info("Removed campaign {} from active Redis set due to event {}", campaignId, eventTypeStr);
                 }
@@ -116,6 +116,7 @@ public class CampaignSyncConsumer {
 
     @DltHandler
     public void handleDlt(Object message, @Header(KafkaHeaders.RECEIVED_TOPIC) String topic) {
-        System.err.println("Message failed 5 times and sent to DLT: " + topic + " - " + message);
+        log.error("Campaign event failed all retries and sent to DLT: {} - {}", topic, message);
+        meterRegistry.counter("kafka_dlt_depth_total", "topic", topic).increment();
     }
 }

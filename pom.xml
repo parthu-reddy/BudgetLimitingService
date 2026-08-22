@@ -5,7 +5,9 @@
         <groupId>com.fooddelivery</groupId>
         <artifactId>food-delivery-parent</artifactId>
         <version>1.0-SNAPSHOT</version>
-        <relativePath>../pom.xml</relativePath>
+        <!-- Empty relativePath: resolve from the artifact repository, not a sibling
+             directory. This repo must build on its own, without the workspace. -->
+        <relativePath/>
     </parent>
 
     <groupId>com.fooddelivery</groupId>
@@ -56,6 +58,12 @@
                     <groupId>com.fooddelivery</groupId>
                     <artifactId>common-library</artifactId>
                 </dependency>
+        <dependency>
+            <groupId>com.fooddelivery</groupId>
+            <artifactId>common-library</artifactId>
+            <type>test-jar</type>
+            <scope>test</scope>
+        </dependency>
         <dependency>
                     <groupId>org.springframework.boot</groupId>
                     <artifactId>spring-boot-starter-test</artifactId>
@@ -141,6 +149,14 @@
             <artifactId>awaitility</artifactId>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+        </dependency>
 </dependencies>
 
 
@@ -150,14 +166,7 @@
                 <groupId>org.springdoc</groupId>
                 <artifactId>springdoc-openapi-maven-plugin</artifactId>
                 <version>1.4</version>
-                <executions>
-                    <execution>
-                        <phase>integration-test</phase>
-                        <goals>
-                            <goal>generate</goal>
-                        </goals>
-                    </execution>
-                </executions>
+                
                 <configuration>
                     <apiDocsUrl>http://localhost:8099/v3/api-docs</apiDocsUrl>
                     <outputFileName>openapi.json</outputFileName>
@@ -233,6 +242,7 @@
                 <configuration>
                     <skip>false</skip><testFramework>JUNIT5</testFramework>
                     <failOnNoContracts>false</failOnNoContracts>
+                    <baseClassForTests>com.fooddelivery.advertisement.pacing.contract.BaseMessagingClass</baseClassForTests>
 
                     </configuration>
             </plugin>

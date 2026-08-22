@@ -22,7 +22,16 @@ spring:
     password: ${SPRING_DATASOURCE_PASSWORD:postgres}
   jpa:
     hibernate:
-      ddl-auto: update
+      # Flyway owns the schema; Hibernate only checks it matches the entities. This service owns no
+      # entities of its own -- outbox_events and idempotency_keys come from common-library's
+      # db/migration/common migrations, which ship inside the jar and are picked up by Flyway's
+      # recursive classpath:db/migration scan. Quartz still self-initialises via
+      # spring.quartz.jdbc.initialize-schema above.
+      ddl-auto: validate
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    baseline-version: '0'
   cloud:
     openfeign:
       circuitbreaker:

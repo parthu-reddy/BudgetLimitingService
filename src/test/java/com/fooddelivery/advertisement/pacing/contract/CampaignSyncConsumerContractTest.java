@@ -1,5 +1,7 @@
 package com.fooddelivery.advertisement.pacing.contract;
 
+import com.fooddelivery.common.contract.KafkaStubMessageSender;
+
 import com.fooddelivery.advertisement.pacing.messaging.CampaignSyncConsumer;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -76,6 +78,11 @@ class CampaignSyncConsumerContractTest {
         SetOperations<String, String> setOps = Mockito.mock(SetOperations.class);
         Mockito.when(redisTemplate.opsForValue()).thenReturn(valueOps);
         Mockito.when(redisTemplate.opsForSet()).thenReturn(setOps);
+
+        // tryClaim is INSERT ... ON CONFLICT DO NOTHING: 1 = claimed, 0 = already seen.
+        // An unstubbed int mock returns 0, so without this every event looks like a
+        // duplicate and the consumer returns before touching Redis.
+        Mockito.when(idempotencyKeyRepository.tryClaim(anyString())).thenReturn(1);
 
         stubTrigger.trigger("ad_events");
 
