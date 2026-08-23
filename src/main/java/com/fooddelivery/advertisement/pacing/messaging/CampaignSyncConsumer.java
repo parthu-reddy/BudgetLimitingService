@@ -43,7 +43,7 @@ public class CampaignSyncConsumer {
     }
 
     @RetryableTopic(attempts = "5", backoff = @Backoff(delay = 1000, multiplier = 2.0), autoCreateTopics = "true", dltStrategy = DltStrategy.FAIL_ON_ERROR)
-    @KafkaListener(topics = KafkaConstants.TOPIC_AD_EVENTS, groupId = "budget-pacing-service-sync")
+    @KafkaListener(topics = KafkaConstants.TOPIC_AD_EVENTS, groupId = "budget-pacing-service-sync-campaignsyncconsumer")
     public void consumeCampaignEvent(String message, @org.springframework.messaging.handler.annotation.Headers java.util.Map<String, Object> headers) throws Exception {
         JsonNode root = objectMapper.readTree(message);
         

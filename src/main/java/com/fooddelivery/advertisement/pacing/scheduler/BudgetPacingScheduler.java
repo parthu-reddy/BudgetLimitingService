@@ -16,12 +16,12 @@ public class BudgetPacingScheduler {
         this.redisTemplate = redisTemplate;
     }
 
-    @Scheduled(fixedRateString = "${pacing.interval.ms:60000}")
+    @Scheduled(fixedDelayString = "${pacing.interval.ms:60000}")
     public void runPacingEvaluation() {
-        Boolean locked = redisTemplate.opsForValue().setIfAbsent("lock:pacing_job", "1", java.time.Duration.ofSeconds(50));
-        if (!Boolean.TRUE.equals(locked)) {
-            return;
-        }
+        com.fooddelivery.common.lock.RedisLock _redisLock = new com.fooddelivery.common.lock.RedisLock(redisTemplate);
+        String _lockToken = java.util.UUID.randomUUID().toString();
+        boolean locked = _redisLock.tryAcquire("lock:pacing_job", _lockToken, java.time.Duration.ofSeconds(50));
+        if (!locked) { return; }
         
         try {
             org.springframework.data.redis.core.ScanOptions options = org.springframework.data.redis.core.ScanOptions.scanOptions().match("*").count(100).build();
@@ -42,7 +42,7 @@ public class BudgetPacingScheduler {
                 e.printStackTrace();
             }
         } finally {
-            redisTemplate.delete("lock:pacing_job");
+            _redisLock.release("lock:pacing_job", _lockToken);
         }
     }
 }
