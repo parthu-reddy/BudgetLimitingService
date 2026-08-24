@@ -18,7 +18,6 @@ import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 @org.springframework.boot.autoconfigure.domain.EntityScan(basePackages = {"com.fooddelivery.advertisement.pacing", "com.fooddelivery.common.entity"})
 @org.springframework.data.jpa.repository.config.EnableJpaRepositories(basePackages = {"com.fooddelivery.advertisement.pacing", "com.fooddelivery.common.repository"})
 @Import(NotificationRouterService.class)
-@com.fooddelivery.common.outbox.config.EnableOutbox
 public class BudgetPacingApplication {
     public static void main(String[] args) {
         SpringApplication.run(BudgetPacingApplication.class, args);
