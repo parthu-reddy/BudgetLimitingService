@@ -51,6 +51,7 @@ class CampaignSyncConsumerContractTest {
 
     @org.springframework.boot.SpringBootConfiguration
     @org.springframework.boot.autoconfigure.EnableAutoConfiguration
+    
     @Import(CampaignSyncConsumer.class)
     static class TestConfig {
         @Bean

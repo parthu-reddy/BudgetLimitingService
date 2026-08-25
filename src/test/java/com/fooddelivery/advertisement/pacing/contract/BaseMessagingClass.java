@@ -24,8 +24,8 @@ import org.springframework.test.context.DynamicPropertySource;
 @EmbeddedKafka(partitions = 1, topics = {"ad-events"})
 public abstract class BaseMessagingClass {
 
-    @org.springframework.boot.SpringBootConfiguration
-    @org.springframework.boot.autoconfigure.EnableAutoConfiguration
+    @org.springframework.boot.test.context.TestConfiguration
+    
     static class TestConfig {
         @Bean
         public KafkaMessageVerifier kafkaMessageVerifier() {

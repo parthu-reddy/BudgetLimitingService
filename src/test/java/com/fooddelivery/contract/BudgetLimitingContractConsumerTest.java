@@ -28,8 +28,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 public class BudgetLimitingContractConsumerTest {
 
 
-    @Configuration
-    @EnableAutoConfiguration(exclude = {
+    @org.springframework.boot.SpringBootConfiguration
+    @org.springframework.boot.autoconfigure.EnableAutoConfiguration(exclude = {
             DataSourceAutoConfiguration.class,
             DataSourceTransactionManagerAutoConfiguration.class,
             HibernateJpaAutoConfiguration.class
