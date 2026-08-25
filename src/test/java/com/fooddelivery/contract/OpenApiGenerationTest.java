@@ -82,8 +82,7 @@ import org.springframework.data.redis.connection.ReactiveRedisConnectionFactory;
 public class OpenApiGenerationTest {
 
     // Mock critical infrastructure so the context loads
-    @MockBean
-    private DataSource dataSource;
+    
     @MockBean
     private KafkaTemplate<?, ?> kafkaTemplate;
     @MockBean
