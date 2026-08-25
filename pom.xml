@@ -61,7 +61,8 @@
         <dependency>
             <groupId>com.fooddelivery</groupId>
             <artifactId>common-library</artifactId>
-            <type>test-jar</type>
+            <version>1.0-SNAPSHOT</version>
+            <classifier>tests</classifier>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -163,7 +164,8 @@
                 <artifactId>springdoc-openapi-maven-plugin</artifactId>
                 <version>1.4</version>
                 
-                <configuration>
+                                
+<configuration>
                     <apiDocsUrl>http://localhost:8099/v3/api-docs</apiDocsUrl>
                     <outputFileName>openapi.json</outputFileName>
                     <outputDir>${project.build.directory}</outputDir>
