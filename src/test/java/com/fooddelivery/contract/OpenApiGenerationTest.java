@@ -32,7 +32,7 @@ import org.springframework.data.redis.connection.ReactiveRedisConnectionFactory;
     "springdoc.writer-with-default-pretty-printer=true",
     "spring.cloud.config.enabled=false",
     "eureka.client.enabled=false",
-    "spring.kafka.bootstrap-servers=localhost:9092",
+    "spring.kafka.bootstrap-servers=localhost:9092", "spring.kafka.listener.auto-startup=false", "spring.kafka.admin.fail-fast=true",
     "spring.flyway.enabled=false",    "spring.sql.init.mode=never",
     "spring.main.allow-bean-definition-overriding=true",
     "spring.jpa.hibernate.ddl-auto=none",
