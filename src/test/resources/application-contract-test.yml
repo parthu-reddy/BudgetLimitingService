@@ -74,6 +74,15 @@ delivery:
   executive:
     radius: 5.0
 campaign-service:
+  # CampaignClient sets an explicit @FeignClient url, which bypasses service discovery, so the
+  # stub-runner service-id registration does not apply and this must be a port known up front.
+  # A ${stubrunner.runningstubs...} placeholder does NOT work here: Feign resolves its url when the
+  # client bean is created, before stub runner registers those properties, and the context fails
+  # with "is malformed".
+  #
+  # A fixed port is safe here only because 8095 is bound by no other module. That is the actual
+  # invariant for a parallel build -- no two modules may share a port -- so if you add a stub runner
+  # anywhere else, do not reuse 8095.
   url: http://localhost:8095
 platform:
   auction:
