@@ -6,6 +6,13 @@ import org.springframework.stereotype.Component;
 import java.util.Arrays;
 
 @Component
+/**
+ * <strong>@replication-safe: distributed-lock</strong> -- holds a Redis SET NX lock for the duration of the sweep.
+ *
+ * <p>Classification recorded 2026-08-27 (Phase 7). Every @Scheduled class in this workspace
+ * carries one of these markers; the BOOT-SCHEDULE-CLASSIFIED check fails on a new one that
+ * does not. Change the marker only after re-reading what the job actually does.
+ */
 public class BudgetPacingScheduler {
 
     private final PacingEngineService pacingEngineService;
