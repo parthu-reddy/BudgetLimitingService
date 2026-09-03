@@ -54,6 +54,9 @@ jobs:
       - name: Build Microservice
         run: mvn -B clean package -DskipTests -f BudgetLimitingService/pom.xml
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -71,6 +74,7 @@ jobs:
           file: BudgetLimitingService/Dockerfile
           push: true
           tags: hyd.ocir.io/axekmbadoczl/food-delivery/budget-pacing-service:${{ github.sha }}
+          platforms: linux/amd64,linux/arm64
 
       - name: Checkout Deployment Repo
         uses: actions/checkout@v5
