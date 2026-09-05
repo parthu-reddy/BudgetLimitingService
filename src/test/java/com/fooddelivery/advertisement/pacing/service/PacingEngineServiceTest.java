@@ -2,7 +2,7 @@ package com.fooddelivery.advertisement.pacing.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fooddelivery.advertisement.pacing.client.CampaignClient;
-import com.fooddelivery.advertisement.pacing.dto.CampaignPacingDTO;
+import com.fooddelivery.common.dto.campaign.CampaignPacingDTO;
 import com.fooddelivery.common.constants.RedisKeyConstants;
 import com.fooddelivery.common.outbox.repository.OutboxEventRepository;
 import com.fooddelivery.common.service.NotificationRouterService;

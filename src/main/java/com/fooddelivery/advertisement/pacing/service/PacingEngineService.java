@@ -5,7 +5,7 @@ import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.stereotype.Service;
 import com.fooddelivery.common.constants.RedisKeyConstants;
 import com.fooddelivery.advertisement.pacing.client.CampaignClient;
-import com.fooddelivery.advertisement.pacing.dto.CampaignPacingDTO;
+import com.fooddelivery.common.dto.campaign.CampaignPacingDTO;
 import java.util.List;
 import java.util.Map;
 import java.util.HashMap;

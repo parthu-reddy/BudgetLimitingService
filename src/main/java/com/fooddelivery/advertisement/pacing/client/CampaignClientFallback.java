@@ -1,6 +1,6 @@
 package com.fooddelivery.advertisement.pacing.client;
 
-import com.fooddelivery.advertisement.pacing.dto.CampaignPacingDTO;
+import com.fooddelivery.common.dto.campaign.CampaignPacingDTO;
 import org.springframework.stereotype.Component;
 import java.util.List;
 import java.util.Map;

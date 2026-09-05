@@ -1,7 +1,7 @@
 package com.fooddelivery.contract;
 
 import com.fooddelivery.advertisement.pacing.client.CampaignClient;
-import com.fooddelivery.advertisement.pacing.dto.CampaignPacingDTO;
+import com.fooddelivery.common.dto.campaign.CampaignPacingDTO;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;

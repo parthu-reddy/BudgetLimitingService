@@ -1,6 +1,6 @@
 package com.fooddelivery.advertisement.pacing.client;
 
-import com.fooddelivery.advertisement.pacing.dto.CampaignPacingDTO;
+import com.fooddelivery.common.dto.campaign.CampaignPacingDTO;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
