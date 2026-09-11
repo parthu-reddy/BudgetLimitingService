@@ -162,7 +162,7 @@
             <groupId>org.flywaydb</groupId>
             <artifactId>flyway-database-postgresql</artifactId>
         </dependency>
-<dependency><groupId>com.fooddelivery</groupId><artifactId>common-library</artifactId><version>1.0-SNAPSHOT</version><type>test-jar</type><scope>test</scope></dependency><dependency><groupId>com.tngtech.archunit</groupId><artifactId>archunit-junit5</artifactId><version>1.2.1</version><scope>test</scope></dependency></dependencies>
+<dependency><groupId>com.tngtech.archunit</groupId><artifactId>archunit-junit5</artifactId><version>1.2.1</version><scope>test</scope></dependency></dependencies>
 
 
     <build>
