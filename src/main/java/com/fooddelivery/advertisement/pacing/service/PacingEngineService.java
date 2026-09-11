@@ -107,7 +107,7 @@ public class PacingEngineService {
                 // Budget exhausted
                 updatedMultipliers.put(campaignId, 0.0);
                 meterRegistry.summary("pacing_multiplier").record(0.0);
-                emitBudgetExhaustedEvent(campaignId, pacingDTO.getAdvertiserId());
+                emitBudgetExhaustedEvent(campaignId, pacingDTO.getAdvertiserId(), dailyBudget);
                 // Remove from active campaigns set
                 redisTemplate.opsForSet().remove(RedisKeyConstants.KEY_ACTIVE_CAMPAIGNS, campaignId);
                 continue;
@@ -165,7 +165,7 @@ public class PacingEngineService {
         if (Boolean.FALSE.equals(alreadyNotified)) {
             NotificationRequestEvent evt = NotificationRequestEvent.builder()
                 .channel(ChannelType.EMAIL)
-                .eventName("BUDGET_RUNNING_LOW")
+                .eventName(com.fooddelivery.common.constants.NotificationTemplate.BUDGET_RUNNING_LOW)
                 .userId(advertiserIdStr != null ? UUID.fromString(advertiserIdStr) : null)
                 .payload(Map.of("campaignId", campaignId, "message", "Your campaign budget is running low (<20% remaining)."))
                 .build();
@@ -174,7 +174,18 @@ public class PacingEngineService {
         }
     }
 
-    private void emitBudgetExhaustedEvent(String campaignId, UUID advertiserId) {
+    /**
+     * One event per exhaustion episode, keyed so the outbox's unique constraint can enforce it.
+     *
+     * <p>The key was {@code campaignId + ":exhausted:" + System.currentTimeMillis()}, which is
+     * unique by construction: the row looked protected by {@code outbox_events.idempotency_key} and
+     * was not. An episode is identified by the campaign, the business day, and the budget it
+     * exhausted against -- so a duplicate emit inside one episode collides, while a top-up (a new
+     * budget) or the next day's reset legitimately emits again. Keying on the day alone would
+     * swallow the second exhaustion after a same-day top-up and leave a campaign serving with no
+     * budget.
+     */
+    private void emitBudgetExhaustedEvent(String campaignId, UUID advertiserId, double dailyBudget) {
         try {
             CampaignChangedEvent eventPayload = CampaignChangedEvent.builder()
                 .campaignId(UUID.fromString(campaignId))
@@ -188,7 +199,9 @@ public class PacingEngineService {
                 .aggregateType(AggregateType.ADVERTISEMENT)
                 .aggregateId(campaignId)
                 .eventType(EventType.AD_CAMPAIGN_BUDGET_EXHAUSTED)
-                .idempotencyKey(campaignId + ":exhausted:" + System.currentTimeMillis())
+                .idempotencyKey(campaignId + ":exhausted:"
+                        + java.time.LocalDate.now(java.time.ZoneId.of(businessZone))
+                        + ":" + java.math.BigDecimal.valueOf(dailyBudget).toPlainString())
                 .payload(objectMapper.writeValueAsString(eventPayload))
                 .status(OutboxStatus.UNPROCESSED)
                 .build();
@@ -213,7 +226,15 @@ public class PacingEngineService {
                 .aggregateType(AggregateType.ADVERTISEMENT)
                 .aggregateId(campaignId)
                 .eventType(EventType.AD_CAMPAIGN_PACING_UPDATED)
-                .idempotencyKey(campaignId + ":pacing:" + System.currentTimeMillis())
+                // Deliberately no idempotency key. This event is a periodic sample of a
+                // continuously varying multiplier, emitted whenever it changes -- there is no
+                // natural key for "this sample", and the same multiplier recurs legitimately later
+                // in the day. It carried `campaignId + ":pacing:" + System.currentTimeMillis()`,
+                // which is unique by construction: it made the row look protected by
+                // outbox_events.idempotency_key while enforcing nothing. A null key says honestly
+                // that there is no database-level dedup here. Duplicate emits are already prevented
+                // upstream -- BudgetPacingScheduler holds the `lock:pacing_job` Redis lock for the
+                // sweep, and CampaignSyncConsumer claims an idempotency key before it triggers one.
                 .payload(objectMapper.writeValueAsString(eventPayload))
                 .status(OutboxStatus.UNPROCESSED)
                 .build();

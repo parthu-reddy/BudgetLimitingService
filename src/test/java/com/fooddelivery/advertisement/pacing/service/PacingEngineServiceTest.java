@@ -107,4 +107,98 @@ class PacingEngineServiceTest {
             return false;
         }));
     }
+
+    /** Drive one evaluation where the campaign has spent its whole daily budget. */
+    private com.fooddelivery.common.outbox.entity.OutboxEventEntity exhaust(String campaignId, double dailyBudget) {
+        List<String> activeCampaigns = Collections.singletonList(campaignId);
+        // Spend == budget, in ten-thousandths.
+        String spend = String.valueOf((long) (dailyBudget * 10000));
+        when(redisTemplate.executePipelined(any(RedisCallback.class))).thenReturn(List.of("1.0", spend, spend));
+        when(redisTemplate.opsForSet()).thenReturn(setOperations);
+
+        CampaignPacingDTO dto = new CampaignPacingDTO();
+        dto.setDailyBudget(dailyBudget);
+        dto.setAdvertiserId(UUID.randomUUID());
+        when(campaignClient.getDailyBudgets(activeCampaigns)).thenReturn(Map.of(campaignId, dto));
+
+        pacingEngineService.evaluatePacingForCampaigns(activeCampaigns);
+
+        var captor = org.mockito.ArgumentCaptor.forClass(com.fooddelivery.common.outbox.entity.OutboxEventEntity.class);
+        verify(outboxEventRepository, atLeastOnce()).save(captor.capture());
+        return captor.getAllValues().stream()
+                .filter(e -> e.getEventType() == com.fooddelivery.common.constants.EventType.AD_CAMPAIGN_BUDGET_EXHAUSTED)
+                .reduce((a, b) -> b)
+                .orElseThrow(() -> new AssertionError("no AD_CAMPAIGN_BUDGET_EXHAUSTED event was emitted"));
+    }
+
+    /**
+     * The exhaustion event's idempotency key identifies an <em>episode</em>, not an instant.
+     *
+     * <p>It was {@code campaignId + ":exhausted:" + System.currentTimeMillis()} — unique by
+     * construction, so `outbox_events.idempotency_key` (which is UNIQUE) enforced nothing and the
+     * row merely looked protected. Re-running the same evaluation must now produce the same key.
+     */
+    @Test
+    void theExhaustionKeyIsTheSameForTheSameEpisode() {
+        String campaignId = UUID.randomUUID().toString();
+
+        String first = exhaust(campaignId, 100.0).getIdempotencyKey();
+        reset(outboxEventRepository);
+        String second = exhaust(campaignId, 100.0).getIdempotencyKey();
+
+        org.junit.jupiter.api.Assertions.assertEquals(first, second,
+                "two emits of the same exhaustion must collide on the unique constraint");
+        org.junit.jupiter.api.Assertions.assertTrue(first.contains(campaignId), first);
+    }
+
+    /**
+     * A top-up is a new episode, so it must emit again.
+     *
+     * <p>This is why the key carries the budget and not just the day: keying on the day alone would
+     * swallow the second exhaustion after a same-day top-up and leave the campaign serving with no
+     * budget.
+     */
+    @Test
+    void aToppedUpBudgetIsANewEpisode() {
+        String campaignId = UUID.randomUUID().toString();
+
+        String before = exhaust(campaignId, 100.0).getIdempotencyKey();
+        reset(outboxEventRepository);
+        String afterTopUp = exhaust(campaignId, 250.0).getIdempotencyKey();
+
+        org.junit.jupiter.api.Assertions.assertNotEquals(before, afterTopUp,
+                "exhausting a topped-up budget is a different fact and must not be deduplicated");
+    }
+
+    /**
+     * The pacing-update event carries no idempotency key, deliberately.
+     *
+     * <p>It is a periodic sample of a continuously varying multiplier: there is no natural key for
+     * "this sample", and the same multiplier recurs legitimately later in the day. A null key says
+     * that honestly; the timestamp key it used to carry said the opposite.
+     */
+    @Test
+    void thePacingUpdateEventClaimsNoIdempotencyKey() {
+        String campaignId = UUID.randomUUID().toString();
+        List<String> activeCampaigns = Collections.singletonList(campaignId);
+        when(redisTemplate.executePipelined(any(RedisCallback.class))).thenReturn(List.of("1.0", "600000", "600000"));
+
+        CampaignPacingDTO dto = new CampaignPacingDTO();
+        dto.setDailyBudget(100.0);
+        dto.setAdvertiserId(UUID.randomUUID());
+        when(campaignClient.getDailyBudgets(activeCampaigns)).thenReturn(Map.of(campaignId, dto));
+
+        java.time.LocalTime noon = java.time.LocalTime.of(12, 0, 0);
+        try (var mockedTime = mockStatic(java.time.LocalTime.class)) {
+            mockedTime.when(() -> java.time.LocalTime.now(java.time.ZoneId.of("UTC"))).thenReturn(noon);
+            pacingEngineService.evaluatePacingForCampaigns(activeCampaigns);
+        }
+
+        var captor = org.mockito.ArgumentCaptor.forClass(com.fooddelivery.common.outbox.entity.OutboxEventEntity.class);
+        verify(outboxEventRepository, atLeastOnce()).save(captor.capture());
+        captor.getAllValues().stream()
+                .filter(e -> e.getEventType() == com.fooddelivery.common.constants.EventType.AD_CAMPAIGN_PACING_UPDATED)
+                .forEach(e -> org.junit.jupiter.api.Assertions.assertNull(e.getIdempotencyKey(),
+                        "a periodic sample has no natural key; a fabricated one enforces nothing"));
+    }
 }
