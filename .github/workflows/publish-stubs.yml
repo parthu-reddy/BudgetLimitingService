@@ -1,0 +1,55 @@
+name: Publish contract stubs
+
+# Manual only, matching the platform-wide decision that no pipeline runs on its own.
+on:
+  workflow_dispatch:
+
+jobs:
+  publish-stubs:
+    name: Publish budget-pacing-service stubs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          path: BudgetLimitingService
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          java-version: '17'
+          distribution: temurin
+          cache: maven
+
+      # NOT -Pci-tests. That profile sets spring.cloud.contract.verifier.skip=true, and with the
+      # verifier skipped no stubs jar is produced at all -- the build succeeds and emits nothing to
+      # publish. Tests are skipped instead; they run in this service's own build.
+      - name: Build the stubs jar
+        env:
+          PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
+        run: mvn -B clean package -DskipTests -s BudgetLimitingService/.github/maven-settings.xml -f BudgetLimitingService/pom.xml
+
+      # deploy:deploy-file, not deploy. A bare `mvn deploy` would also publish the main artifact --
+      # a Spring Boot fat jar, 118 MB for WalletService -- into a registry whose whole purpose is to
+      # hold 4 KB stub jars.
+      #
+      # Everything goes to ONE registry because StubRunnerProperties.repositoryRoot is a single
+      # Resource, not a list, so a consumer can point at exactly one. Cross-repository writes need
+      # the classic PACKAGES_TOKEN; the per-run GITHUB_TOKEN is scoped to its own repository.
+      - name: Publish the stubs jar
+        env:
+          PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
+        run: |
+          STUBS=$(ls BudgetLimitingService/target/*-stubs.jar)
+          echo "publishing $STUBS ($(du -h "$STUBS" | cut -f1))"
+          mvn -B deploy:deploy-file \
+            -DrepositoryId=github-contracts \
+            -Durl=https://maven.pkg.github.com/parthu-reddy/FoodDeliveryContracts \
+            -Dfile="$STUBS" \
+            -DgroupId=com.fooddelivery \
+            -DartifactId=budget-pacing-service \
+            -Dversion=1.0-SNAPSHOT \
+            -Dclassifier=stubs \
+            -Dpackaging=jar \
+            -s BudgetLimitingService/.github/maven-settings.xml

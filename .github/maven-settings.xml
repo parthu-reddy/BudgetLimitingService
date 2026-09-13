@@ -34,6 +34,18 @@
       <username>parthu-reddy</username>
       <password>${env.PACKAGES_TOKEN}</password>
     </server>
+    <!-- Added 2026-09-13 for stub publishing. Only the 12 producers carry this; a consumer never
+         deploys, and Stub Runner does not read settings.xml anyway. it has its own
+         stubrunner.username / stubrunner.password. Giving consumers a deploy credential they cannot
+         use would be noise at best.
+
+         PACKAGES_TOKEN rather than GITHUB_TOKEN: stubs go to the FoodDeliveryContracts registry, and
+         a cross-repository write is beyond the per-run token. -->
+    <server>
+      <id>github-contracts</id>
+      <username>parthu-reddy</username>
+      <password>${env.PACKAGES_TOKEN}</password>
+    </server>
   </servers>
 
   <profiles>
