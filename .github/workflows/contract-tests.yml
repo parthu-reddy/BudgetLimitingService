@@ -1,0 +1,41 @@
+name: Contract tests
+
+# Proof of the REMOTE path: this resolves another service's stubs from the shared contracts registry
+# instead of requiring that service to be built into ~/.m2 first. If it passes, the 26-checkout
+# two-pass verification job has nothing left to do for this service.
+on:
+  workflow_dispatch:
+
+jobs:
+  contract-tests:
+    name: Contract tests against published stubs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          path: BudgetLimitingService
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          java-version: '17'
+          distribution: temurin
+          cache: maven
+
+      # No -Pci-tests: that profile excludes **/*Contract*Test.java, which is exactly what runs here.
+      #
+      # STUBRUNNER_* rather than settings.xml: Stub Runner does not read settings credentials. The
+      # shared libraries still come from maven-settings.xml, so this build authenticates to GitHub
+      # twice by two different mechanisms -- not a choice, just what the library supports.
+      - name: Contract tests
+        env:
+          PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
+          STUBRUNNER_MODE: REMOTE
+          STUBRUNNER_ROOT: https://maven.pkg.github.com/parthu-reddy/FoodDeliveryContracts
+          STUBRUNNER_USERNAME: parthu-reddy
+          STUBRUNNER_PASSWORD: ${{ secrets.PACKAGES_TOKEN }}
+        run: |
+          mvn -B test -Dtest='*ContractConsumerTest,*ConsumerContractTest' -DfailIfNoTests=false \
+            -s BudgetLimitingService/.github/maven-settings.xml -f BudgetLimitingService/pom.xml
