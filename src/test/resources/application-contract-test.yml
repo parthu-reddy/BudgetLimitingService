@@ -1,3 +1,16 @@
+# Stub resolution. LOCAL by default so a developer's `mvn test` behaves exactly as before and needs
+# no credentials; CI overrides STUBRUNNER_MODE=REMOTE to resolve from the shared contracts registry
+# instead of requiring every producer to be built into ~/.m2 first.
+#
+# Stub Runner does NOT read settings.xml credentials -- its own documentation says authentication
+# details for repositories and profiles are not taken into account -- so it carries its own
+# username/password rather than reusing .github/maven-settings.xml.
+stubrunner:
+  stubs-mode: ${STUBRUNNER_MODE:LOCAL}
+  repository-root: ${STUBRUNNER_ROOT:}
+  username: ${STUBRUNNER_USERNAME:}
+  password: ${STUBRUNNER_PASSWORD:}
+
 spring:
   config:
     import: ""
