@@ -51,7 +51,12 @@ class CampaignSyncConsumerContractTest {
     @org.springframework.boot.SpringBootConfiguration
     @org.springframework.boot.autoconfigure.EnableAutoConfiguration
     
-    @Import(CampaignSyncConsumer.class)
+    // EventBinder: the consumer now needs one, and a sliced context does not inherit the
+// application's scan of com.fooddelivery.common. Imported directly rather than via a
+// helper @Configuration in common-test -- such a class sits in an unlayered package and
+// depending on ..event.. (the Service layer) fails ArchitectureEnforcementTest in every
+// module. Spring builds it from the context's ObjectMapper and Validator.
+@Import({CampaignSyncConsumer.class, com.fooddelivery.common.event.EventBinder.class})
     static class TestConfig {
         @Bean
         public MessageVerifierSender<Message<?>> kafkaStubMessageSender(KafkaTemplate<String, String> t) {
