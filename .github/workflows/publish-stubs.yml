@@ -26,28 +26,38 @@ jobs:
       # verifier skipped no stubs jar is produced at all -- the build succeeds and emits nothing to
       # publish.
       #
-      # Tests are NOT skipped here. They used to be, on the grounds that they 'run in this service's
-      # own build' -- but that build is build-and-push.yml, which uses -Pci-tests and therefore never
-      # generates them. The result was that no workflow anywhere ran a producer contract test, and
-      # every stubs jar in the registry was an unverified recording.
+      # Tests are skipped in THIS step only; the producer contract tests run in the next one, scoped
+      # so that consumer contract tests (which need registry stubs) stay out of this job.
       - name: Build the stubs jar
         env:
           PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
-        run: mvn -B clean package -s BudgetLimitingService/.github/maven-settings.xml -f BudgetLimitingService/pom.xml
+        run: mvn -B clean package -DskipTests -s BudgetLimitingService/.github/maven-settings.xml -f BudgetLimitingService/pom.xml
 
-      # The stubs jar is a recording, and publishing one that was never verified is how a consumer
-      # ends up testing against a contract its producer does not honour. Running the tests above is
-      # only half of it: if generation silently produces nothing, `package` stays green and there is
-      # nothing to run. Assert the tests were both generated and reported.
-      - name: Confirm the producer contract tests actually ran
+      # The stubs jar is a recording. Publishing one nobody verified is how a consumer ends up
+      # testing against a contract its producer does not honour -- which is exactly what happened
+      # with CustomerApplication's getDriverOrderMoney contract, caught only a repo away as an
+      # unhelpful "expected: not <null>".
+      #
+      # ONLY the generated producer tests. Running the whole suite here pulls in CONSUMER contract
+      # tests, which resolve other services' stubs from the registry and need STUBRUNNER_* env this
+      # job deliberately does not have; those belong to contract-tests.yml.
+      #
+      # The gate is separate from running them: if generation silently emits nothing, the test run
+      # is trivially green and the jar still ships unverified.
+      - name: Verify the stubs against this service's own contracts
+        env:
+          PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
         run: |
           GEN_DIR="BudgetLimitingService/target/generated-test-sources/contracts"
           REPORTS="BudgetLimitingService/target/surefire-reports"
-          GEN=$(find "$GEN_DIR" -name '*Test.java' 2>/dev/null | wc -l | tr -d ' ')
-          if [ "$GEN" -eq 0 ]; then
+          CLASSES=$(find "$GEN_DIR" -name '*Test.java' -exec basename {} .java \; 2>/dev/null | sort -u | paste -sd, -)
+          if [ -z "$CLASSES" ]; then
             echo "::error::No producer contract tests were generated. The stubs jar would be published unverified."
             exit 1
           fi
+          echo "running producer contract tests: $CLASSES"
+          mvn -B test -Dtest="$CLASSES" -DfailIfNoTests=false \
+            -s BudgetLimitingService/.github/maven-settings.xml -f BudgetLimitingService/pom.xml
           MISSING=0
           for f in $(find "$GEN_DIR" -name '*Test.java' 2>/dev/null); do
             b=$(basename "$f" .java)
@@ -57,7 +67,8 @@ jobs:
             fi
           done
           [ "$MISSING" -eq 0 ] || exit 1
-          echo "OK: $GEN generated producer contract test class(es) generated and executed"
+          echo "OK: producer contract tests generated and executed"
+
 
       # deploy:deploy-file, not deploy. A bare `mvn deploy` would also publish the main artifact --
       # a Spring Boot fat jar, 118 MB for WalletService -- into a registry whose whole purpose is to
