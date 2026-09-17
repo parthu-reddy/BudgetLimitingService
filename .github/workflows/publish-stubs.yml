@@ -24,11 +24,40 @@ jobs:
 
       # NOT -Pci-tests. That profile sets spring.cloud.contract.verifier.skip=true, and with the
       # verifier skipped no stubs jar is produced at all -- the build succeeds and emits nothing to
-      # publish. Tests are skipped instead; they run in this service's own build.
+      # publish.
+      #
+      # Tests are NOT skipped here. They used to be, on the grounds that they 'run in this service's
+      # own build' -- but that build is build-and-push.yml, which uses -Pci-tests and therefore never
+      # generates them. The result was that no workflow anywhere ran a producer contract test, and
+      # every stubs jar in the registry was an unverified recording.
       - name: Build the stubs jar
         env:
           PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
-        run: mvn -B clean package -DskipTests -s BudgetLimitingService/.github/maven-settings.xml -f BudgetLimitingService/pom.xml
+        run: mvn -B clean package -s BudgetLimitingService/.github/maven-settings.xml -f BudgetLimitingService/pom.xml
+
+      # The stubs jar is a recording, and publishing one that was never verified is how a consumer
+      # ends up testing against a contract its producer does not honour. Running the tests above is
+      # only half of it: if generation silently produces nothing, `package` stays green and there is
+      # nothing to run. Assert the tests were both generated and reported.
+      - name: Confirm the producer contract tests actually ran
+        run: |
+          GEN_DIR="BudgetLimitingService/target/generated-test-sources/contracts"
+          REPORTS="BudgetLimitingService/target/surefire-reports"
+          GEN=$(find "$GEN_DIR" -name '*Test.java' 2>/dev/null | wc -l | tr -d ' ')
+          if [ "$GEN" -eq 0 ]; then
+            echo "::error::No producer contract tests were generated. The stubs jar would be published unverified."
+            exit 1
+          fi
+          MISSING=0
+          for f in $(find "$GEN_DIR" -name '*Test.java' 2>/dev/null); do
+            b=$(basename "$f" .java)
+            if ! ls "$REPORTS"/TEST-*."$b".xml >/dev/null 2>&1; then
+              echo "::error::Generated contract test $b was compiled but never ran."
+              MISSING=1
+            fi
+          done
+          [ "$MISSING" -eq 0 ] || exit 1
+          echo "OK: $GEN generated producer contract test class(es) generated and executed"
 
       # deploy:deploy-file, not deploy. A bare `mvn deploy` would also publish the main artifact --
       # a Spring Boot fat jar, 118 MB for WalletService -- into a registry whose whole purpose is to
