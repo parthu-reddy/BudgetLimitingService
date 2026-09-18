@@ -59,3 +59,4 @@ flowchart TD
 - **Circuit Breaking**: The CampaignService budget lookup is guarded by a Feign fallback
   (`CampaignClientFallback`), so a failure there degrades to safe default pacing rather than blocking
   bidding. The service has no time-series database and no ML model to fail.
+
