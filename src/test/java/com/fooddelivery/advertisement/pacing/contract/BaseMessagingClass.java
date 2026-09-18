@@ -22,7 +22,7 @@ import org.springframework.test.context.DynamicPropertySource;
 @org.springframework.test.context.ActiveProfiles("contract-test")
 @AutoConfigureMessageVerifier
 @org.springframework.test.annotation.DirtiesContext(classMode = org.springframework.test.annotation.DirtiesContext.ClassMode.BEFORE_CLASS)
-@EmbeddedKafka(partitions = 1, topics = {"ad-events"})
+@EmbeddedKafka(adminTimeout = 60, partitions = 1, topics = {"ad-events"})
 public abstract class BaseMessagingClass {
 
     @org.springframework.boot.SpringBootConfiguration
