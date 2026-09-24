@@ -60,3 +60,5 @@ flowchart TD
   (`CampaignClientFallback`), so a failure there degrades to safe default pacing rather than blocking
   bidding. The service has no time-series database and no ML model to fail.
 
+
+<!-- dummy data -->
