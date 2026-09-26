@@ -39,45 +39,31 @@ public class PacingEngineService {
     @org.springframework.beans.factory.annotation.Value("${pacing.time-of-day-target.enabled:false}")
     private boolean timeOfDayTargetEnabled;
 
-    @org.springframework.beans.factory.annotation.Value("${platform.business-zone:UTC}")
-    private String businessZone;
+    private final java.time.Clock clock;
 
-    public PacingEngineService(StringRedisTemplate redisTemplate, CampaignClient campaignClient, NotificationRouterService notificationRouterService, OutboxEventRepository outboxEventRepository, ObjectMapper objectMapper, io.micrometer.core.instrument.MeterRegistry meterRegistry) {
+    public PacingEngineService(StringRedisTemplate redisTemplate, CampaignClient campaignClient, NotificationRouterService notificationRouterService, OutboxEventRepository outboxEventRepository, ObjectMapper objectMapper, io.micrometer.core.instrument.MeterRegistry meterRegistry, java.time.Clock clock) {
         this.redisTemplate = redisTemplate;
         this.campaignClient = campaignClient;
         this.notificationRouterService = notificationRouterService;
         this.outboxEventRepository = outboxEventRepository;
         this.objectMapper = objectMapper;
         this.meterRegistry = meterRegistry;
+        this.clock = clock;
     }
 
     public void evaluatePacingForCampaigns(List<String> activeCampaignIds) {
         if (activeCampaignIds == null || activeCampaignIds.isEmpty()) return;
-        // 1. Pipeline Get all current multipliers, daily spends, and lifetime spends
-        List<Object> pipelineResults = redisTemplate.executePipelined((RedisCallback<Object>) connection -> {
-            for (String campaignId : activeCampaignIds) {
-                // Get multiplier
-                connection.get(redisTemplate.getStringSerializer().serialize(String.format(RedisKeyConstants.PREFIX_AD_CAMPAIGN_PACING, campaignId)));
-                // Get current daily spend
-                connection.get(redisTemplate.getStringSerializer().serialize("campaign:spend:daily:" + campaignId));
-                // Get current lifetime spend
-                connection.get(redisTemplate.getStringSerializer().serialize("campaign:spend:lifetime:" + campaignId));
-            }
-            return null;
-        });
-        
-        // 2. Fetch daily budgets
+        // 1. Budgets first. Each carries its advertiser's zone, and today's spend is a key on that
+        //    calendar, so the zone must be known before Redis is read. (This used to read one rolling
+        //    24h key per campaign and pace it against a platform-wide midnight: defect D6,
+        //    RandomDocuments/TimezoneCorrectness_2026-09-25.)
         Map<String, CampaignPacingDTO> dailyBudgets = campaignClient.getDailyBudgets(activeCampaignIds);
         Map<String, Double> updatedMultipliers = new HashMap<>();
-        
-        // 3. Evaluate
-        for (int i = 0; i < activeCampaignIds.size(); i++) {
-            String campaignId = activeCampaignIds.get(i);
-            
-            Object currentSObj = pipelineResults.get(i * 3);
-            Object spendObj = pipelineResults.get(i * 3 + 1);
-            Object lifetimeSpendObj = pipelineResults.get(i * 3 + 2);
-            
+        java.time.Instant now = clock.instant();
+
+        List<String> paced = new java.util.ArrayList<>();
+        Map<String, java.time.ZoneId> zones = new HashMap<>();
+        for (String campaignId : activeCampaignIds) {
             CampaignPacingDTO pacingDTO = dailyBudgets.get(campaignId);
             if (pacingDTO == null || pacingDTO.getDailyBudget() == null || pacingDTO.getDailyBudget() <= 0) {
                 // Fail fast: Do NOT use a hardcoded default like 50.0. 
@@ -86,15 +72,39 @@ public class PacingEngineService {
                 meterRegistry.summary("pacing_multiplier").record(0.0);
                 continue;
             }
-            
+            paced.add(campaignId);
+            zones.put(campaignId, java.time.ZoneId.of(pacingDTO.getTimeZone()));
+        }
+
+        // 2. Pipeline Get current multipliers, today's spend (on each advertiser's calendar), and lifetime spend
+        List<Object> pipelineResults = paced.isEmpty() ? List.of() : redisTemplate.executePipelined((RedisCallback<Object>) connection -> {
+            for (String campaignId : paced) {
+                java.time.LocalDate today = com.fooddelivery.common.time.BusinessCalendar.localDate(now, zones.get(campaignId));
+                connection.get(redisTemplate.getStringSerializer().serialize(String.format(RedisKeyConstants.PREFIX_AD_CAMPAIGN_PACING, campaignId)));
+                connection.get(redisTemplate.getStringSerializer().serialize(RedisKeyConstants.dailySpendKey(campaignId, today)));
+                connection.get(redisTemplate.getStringSerializer().serialize("campaign:spend:lifetime:" + campaignId));
+            }
+            return null;
+        });
+
+        // 3. Evaluate
+        for (int i = 0; i < paced.size(); i++) {
+            String campaignId = paced.get(i);
+            java.time.ZoneId zone = zones.get(campaignId);
+
+            Object currentSObj = pipelineResults.get(i * 3);
+            Object spendObj = pipelineResults.get(i * 3 + 1);
+            Object lifetimeSpendObj = pipelineResults.get(i * 3 + 2);
+
+            CampaignPacingDTO pacingDTO = dailyBudgets.get(campaignId);
             double currentSpend = parseDouble(spendObj, 0.0) / 10000.0;
             double dailyBudget = pacingDTO.getDailyBudget();
             double targetSpend = dailyBudget;
             
             if (timeOfDayTargetEnabled) {
-                java.time.LocalTime now = java.time.LocalTime.now(java.time.ZoneId.of(businessZone));
-                double elapsedFractionOfDay = (now.getHour() * 3600 + now.getMinute() * 60 + now.getSecond()) / 86400.0;
-                targetSpend = dailyBudget * elapsedFractionOfDay;
+                // How much of the advertiser's day has passed, measured against that day's real
+                // length (23, 24 or 25 hours), not hour*3600 over 86400 on a platform clock.
+                targetSpend = dailyBudget * com.fooddelivery.common.time.BusinessCalendar.fractionOfDayElapsed(now, zone);
             }
             
             double lifetimeSpend = parseDouble(lifetimeSpendObj, 0.0) / 10000.0;
@@ -107,7 +117,8 @@ public class PacingEngineService {
                 // Budget exhausted
                 updatedMultipliers.put(campaignId, 0.0);
                 meterRegistry.summary("pacing_multiplier").record(0.0);
-                emitBudgetExhaustedEvent(campaignId, pacingDTO.getAdvertiserId(), dailyBudget);
+                emitBudgetExhaustedEvent(campaignId, pacingDTO.getAdvertiserId(), dailyBudget,
+                        com.fooddelivery.common.time.BusinessCalendar.localDate(now, zone));
                 // Remove from active campaigns set
                 redisTemplate.opsForSet().remove(RedisKeyConstants.KEY_ACTIVE_CAMPAIGNS, campaignId);
                 continue;
@@ -185,7 +196,7 @@ public class PacingEngineService {
      * swallow the second exhaustion after a same-day top-up and leave a campaign serving with no
      * budget.
      */
-    private void emitBudgetExhaustedEvent(String campaignId, UUID advertiserId, double dailyBudget) {
+    private void emitBudgetExhaustedEvent(String campaignId, UUID advertiserId, double dailyBudget, java.time.LocalDate spendDay) {
         try {
             CampaignChangedEvent eventPayload = CampaignChangedEvent.builder()
                 .campaignId(UUID.fromString(campaignId))
@@ -195,12 +206,12 @@ public class PacingEngineService {
             
             OutboxEventEntity event = OutboxEventEntity.builder()
                 .id(UUID.randomUUID())
-                .createdAt(java.time.LocalDateTime.now())
+                .createdAt(java.time.Instant.now())
                 .aggregateType(AggregateType.ADVERTISEMENT)
                 .aggregateId(campaignId)
                 .eventType(EventType.AD_CAMPAIGN_BUDGET_EXHAUSTED)
                 .idempotencyKey(campaignId + ":exhausted:"
-                        + java.time.LocalDate.now(java.time.ZoneId.of(businessZone))
+                        + spendDay
                         + ":" + java.math.BigDecimal.valueOf(dailyBudget).toPlainString())
                 .payload(objectMapper.writeValueAsString(eventPayload))
                 .status(OutboxStatus.UNPROCESSED)
@@ -222,7 +233,7 @@ public class PacingEngineService {
             
             OutboxEventEntity event = OutboxEventEntity.builder()
                 .id(UUID.randomUUID())
-                .createdAt(java.time.LocalDateTime.now())
+                .createdAt(java.time.Instant.now())
                 .aggregateType(AggregateType.ADVERTISEMENT)
                 .aggregateId(campaignId)
                 .eventType(EventType.AD_CAMPAIGN_PACING_UPDATED)

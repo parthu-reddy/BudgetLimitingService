@@ -52,13 +52,12 @@ class PacingEngineServiceTest {
 
     @BeforeEach
     void setUp() {
+        // Noon UTC: exactly half of a UTC advertiser's day has passed.
         pacingEngineService = new PacingEngineService(
-                redisTemplate, campaignClient, notificationRouterService, outboxEventRepository, objectMapper, meterRegistry
+                redisTemplate, campaignClient, notificationRouterService, outboxEventRepository, objectMapper, meterRegistry,
+                java.time.Clock.fixed(java.time.Instant.parse("2026-09-25T12:00:00Z"), java.time.ZoneOffset.UTC)
         );
         ReflectionTestUtils.setField(pacingEngineService, "timeOfDayTargetEnabled", true);
-        // businessZone is @Value-injected; a plain Mockito context leaves it null and
-        // ZoneId.of(null) throws. The time mock below is built on UTC, so match it.
-        ReflectionTestUtils.setField(pacingEngineService, "businessZone", "UTC");
     }
 
     @Test
@@ -76,6 +75,7 @@ class PacingEngineServiceTest {
         CampaignPacingDTO dto = new CampaignPacingDTO();
         dto.setDailyBudget(100.0);
         dto.setAdvertiserId(UUID.randomUUID());
+        dto.setTimeZone("UTC");
         when(campaignClient.getDailyBudgets(activeCampaigns)).thenReturn(Map.of(campaignId, dto));
 
         // Mock time to be 12:00:00 UTC (exactly 50% of the day)
@@ -83,12 +83,7 @@ class PacingEngineServiceTest {
         // Current spend = 60.0, which is ahead of schedule! (60 > 50)
         // Adjustment ratio = 50.0 / 60.0 = 0.833...
         // New multiplier should be 1.0 * 0.833 = 0.833 (which is less than 1.0)
-        java.time.LocalTime noon = java.time.LocalTime.of(12, 0, 0);
-        try (var mockedTime = mockStatic(java.time.LocalTime.class)) {
-            mockedTime.when(() -> java.time.LocalTime.now(java.time.ZoneId.of("UTC"))).thenReturn(noon);
-
-            pacingEngineService.evaluatePacingForCampaigns(activeCampaigns);
-        }
+        pacingEngineService.evaluatePacingForCampaigns(activeCampaigns);
 
         // Verify that the new multiplier was written via pipeline, and it's less than 1.0
         verify(redisTemplate, times(2)).executePipelined(any(RedisCallback.class));
@@ -119,6 +114,7 @@ class PacingEngineServiceTest {
         CampaignPacingDTO dto = new CampaignPacingDTO();
         dto.setDailyBudget(dailyBudget);
         dto.setAdvertiserId(UUID.randomUUID());
+        dto.setTimeZone("UTC");
         when(campaignClient.getDailyBudgets(activeCampaigns)).thenReturn(Map.of(campaignId, dto));
 
         pacingEngineService.evaluatePacingForCampaigns(activeCampaigns);
@@ -186,13 +182,10 @@ class PacingEngineServiceTest {
         CampaignPacingDTO dto = new CampaignPacingDTO();
         dto.setDailyBudget(100.0);
         dto.setAdvertiserId(UUID.randomUUID());
+        dto.setTimeZone("UTC");
         when(campaignClient.getDailyBudgets(activeCampaigns)).thenReturn(Map.of(campaignId, dto));
 
-        java.time.LocalTime noon = java.time.LocalTime.of(12, 0, 0);
-        try (var mockedTime = mockStatic(java.time.LocalTime.class)) {
-            mockedTime.when(() -> java.time.LocalTime.now(java.time.ZoneId.of("UTC"))).thenReturn(noon);
-            pacingEngineService.evaluatePacingForCampaigns(activeCampaigns);
-        }
+        pacingEngineService.evaluatePacingForCampaigns(activeCampaigns);
 
         var captor = org.mockito.ArgumentCaptor.forClass(com.fooddelivery.common.outbox.entity.OutboxEventEntity.class);
         verify(outboxEventRepository, atLeastOnce()).save(captor.capture());
@@ -200,5 +193,39 @@ class PacingEngineServiceTest {
                 .filter(e -> e.getEventType() == com.fooddelivery.common.constants.EventType.AD_CAMPAIGN_PACING_UPDATED)
                 .forEach(e -> org.junit.jupiter.api.Assertions.assertNull(e.getIdempotencyKey(),
                         "a periodic sample has no natural key; a fabricated one enforces nothing"));
+    }
+
+    /**
+     * Defect D6 (TimezoneCorrectness_2026-09-25): today's spend is read from the key for today on the
+     * advertiser's calendar. At 20:45Z it is already the 26th in Kolkata and still the 25th in New York.
+     * The old code read one rolling 24h key for every campaign.
+     */
+    @Test
+    void readsTodaysSpendKeyOnEachAdvertisersCalendar() throws Exception {
+        PacingEngineService lateEvening = new PacingEngineService(
+                redisTemplate, campaignClient, notificationRouterService, outboxEventRepository, objectMapper, meterRegistry,
+                java.time.Clock.fixed(java.time.Instant.parse("2026-09-25T20:45:00Z"), java.time.ZoneOffset.UTC));
+        String kolkataCampaign = UUID.randomUUID().toString();
+        String newYorkCampaign = UUID.randomUUID().toString();
+        List<String> active = List.of(kolkataCampaign, newYorkCampaign);
+        when(campaignClient.getDailyBudgets(active)).thenReturn(Map.of(
+                kolkataCampaign, new CampaignPacingDTO(100.0, null, UUID.randomUUID(), "Asia/Kolkata"),
+                newYorkCampaign, new CampaignPacingDTO(100.0, null, UUID.randomUUID(), "America/New_York")));
+        when(redisTemplate.getStringSerializer()).thenReturn((org.springframework.data.redis.serializer.RedisSerializer) org.springframework.data.redis.serializer.RedisSerializer.string());
+        List<String> keysRead = new java.util.ArrayList<>();
+        when(redisTemplate.executePipelined(any(RedisCallback.class))).thenAnswer(inv -> {
+            org.springframework.data.redis.connection.RedisConnection connection = org.mockito.Mockito.mock(org.springframework.data.redis.connection.RedisConnection.class);
+            org.mockito.Mockito.lenient().when(connection.get(any(byte[].class))).thenAnswer(g -> {
+                keysRead.add(new String((byte[]) g.getArgument(0), java.nio.charset.StandardCharsets.UTF_8));
+                return null;
+            });
+            ((RedisCallback<?>) inv.getArgument(0)).doInRedis(connection);
+            return keysRead.isEmpty() ? List.of() : java.util.Collections.nCopies(keysRead.size(), (Object) null);
+        });
+
+        lateEvening.evaluatePacingForCampaigns(active);
+
+        org.junit.jupiter.api.Assertions.assertTrue(keysRead.contains("campaign:spend:daily:" + kolkataCampaign + ":2026-09-26"), keysRead.toString());
+        org.junit.jupiter.api.Assertions.assertTrue(keysRead.contains("campaign:spend:daily:" + newYorkCampaign + ":2026-09-25"), keysRead.toString());
     }
 }

@@ -76,7 +76,7 @@ public abstract class BaseMessagingClass {
                         .aggregateId(event.getCampaignId().toString())
                         .eventType(eventType)
                         .payload(objectMapper.writeValueAsString(event))
-                        .createdAt(java.time.LocalDateTime.now())
+                        .createdAt(java.time.Instant.now())
                         .build();
 
         com.fooddelivery.common.outbox.repository.OutboxEventRepository repo =

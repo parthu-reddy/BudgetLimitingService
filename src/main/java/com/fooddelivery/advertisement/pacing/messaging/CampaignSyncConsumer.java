@@ -148,8 +148,9 @@ public CampaignSyncConsumer(ObjectMapper objectMapper, StringRedisTemplate redis
             EventType.AD_CAMPAIGN_BUDGET_EXHAUSTED);
 
     @DltHandler
-    public void handleDlt(Object message, @Header(KafkaHeaders.RECEIVED_TOPIC) String topic) {
-        log.error("Campaign event failed all retries and sent to DLT: {} - {}", topic, message);
+    public void handleDlt(Object message, @Header(KafkaHeaders.RECEIVED_TOPIC) String topic, @Header(KafkaHeaders.RECEIVED_PARTITION) int partition,
+                          @Header(KafkaHeaders.OFFSET) long offset) {
+        log.error("Campaign event failed all retries and sent to DLT: {} - {} replay={}", topic, message, com.fooddelivery.common.util.KafkaHeaderUtils.deadLetterPosition(topic, partition, offset));
         meterRegistry.counter("kafka_dlt_depth_total", "topic", topic).increment();
     }
 }
